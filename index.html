@@ -199,7 +199,7 @@
   const REFRESH_MS = 60000; // auto-refresh every 60 seconds
 
   // Generic table controller, one instance per tab
-  function createTableController({ csvUrl, headEl, bodyEl, tableEl, emptyEl, statusEl, searchEl }) {
+  function createTableController({ csvUrl, headEl, bodyEl, tableEl, emptyEl, statusEl, searchEl, sortBy }) {
     let headers = [];
     let allRows = [];
 
@@ -234,6 +234,20 @@
 
         headers = rows[0];
         allRows = rows.slice(1);
+
+        if (sortBy) {
+          const ptsIdx = headers.indexOf(sortBy.primary);
+          const gdIdx = headers.indexOf(sortBy.tiebreak);
+          if (ptsIdx !== -1) {
+            allRows.sort((a, b) => {
+              const ptsDiff = (parseFloat(b[ptsIdx]) || 0) - (parseFloat(a[ptsIdx]) || 0);
+              if (ptsDiff !== 0) return ptsDiff;
+              if (gdIdx !== -1) return (parseFloat(b[gdIdx]) || 0) - (parseFloat(a[gdIdx]) || 0);
+              return 0;
+            });
+          }
+        }
+
         render(allRows);
 
         tableEl.style.display = "table";
@@ -252,6 +266,7 @@
     searchEl.addEventListener("input", (e) => {
       const q = e.target.value.trim().toLowerCase();
       if (!q) { render(allRows); return; }
+      // allRows is already sorted, so filtering preserves the sorted order
       render(allRows.filter(row => row.some(cell => String(cell).toLowerCase().includes(q))));
     });
 
@@ -267,6 +282,7 @@
     emptyEl: document.getElementById("emptyStandings"),
     statusEl: document.getElementById("statusStandings"),
     searchEl: document.getElementById("searchStandings"),
+    sortBy: { primary: "PTS", tiebreak: "GD" },
   });
 
   createTableController({
