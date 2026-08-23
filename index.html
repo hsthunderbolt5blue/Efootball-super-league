@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Efootball Super League Season 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #0f1420;
@@ -20,7 +23,7 @@
 
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "Merriweather", "Times New Roman", Times, serif;
     background: var(--bg);
     color: var(--text);
     padding: 24px 16px 60px;
@@ -29,6 +32,12 @@
   .wrap { max-width: 1000px; margin: 0 auto; }
 
   header { text-align: center; margin-bottom: 20px; }
+
+  header img.league-logo {
+    max-width: 180px;
+    height: auto;
+    margin-bottom: 10px;
+  }
 
   header h1 {
     font-size: clamp(22px, 4vw, 32px);
@@ -122,6 +131,19 @@
   tbody tr:nth-child(even) { background: var(--row-alt); }
   tbody tr:hover { background: #1a2338; }
 
+  .club-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .club-badge {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
   .empty, .error {
     text-align: center;
     padding: 40px 16px;
@@ -140,6 +162,7 @@
 <body>
 <div class="wrap">
   <header>
+    <img class="league-logo" src="assets/logo.jpeg" alt="Efootball Super League Season 1 logo">
     <h1>Efootball Super League Season 1</h1>
     <p>16 players &middot; double round-robin &middot; 30 matches</p>
   </header>
@@ -198,10 +221,20 @@
 
   const REFRESH_MS = 60000; // auto-refresh every 60 seconds
 
+  // Turns a club name into a filename-friendly slug, e.g. "FC Barcelona" -> "fc-barcelona"
+  function clubSlug(name) {
+    return String(name)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-");
+  }
+
   // Generic table controller, one instance per tab
-  function createTableController({ csvUrl, headEl, bodyEl, tableEl, emptyEl, statusEl, searchEl, sortBy }) {
+  function createTableController({ csvUrl, headEl, bodyEl, tableEl, emptyEl, statusEl, searchEl, sortBy, showBadges }) {
     let headers = [];
     let allRows = [];
+    let clubColIndex = -1;
 
     function escapeHtml(str) {
       return String(str)
@@ -217,7 +250,18 @@
         return;
       }
       bodyEl.innerHTML = rows.map(row => {
-        const cells = headers.map((_, i) => `<td>${escapeHtml(row[i] ?? "")}</td>`).join("");
+        const cells = headers.map((val, i) => {
+          const raw = row[i] ?? "";
+          if (showBadges && i === clubColIndex) {
+            const slug = clubSlug(raw);
+            return `<td><div class="club-cell">
+              <img class="club-badge" src="assets/logos/${slug}.png" alt=""
+                   onerror="this.style.display='none'">
+              <span>${escapeHtml(raw)}</span>
+            </div></td>`;
+          }
+          return `<td>${escapeHtml(raw)}</td>`;
+        }).join("");
         return `<tr>${cells}</tr>`;
       }).join("");
     }
@@ -234,6 +278,7 @@
 
         headers = rows[0];
         allRows = rows.slice(1);
+        clubColIndex = headers.findIndex(h => String(h).trim().toLowerCase() === "club");
 
         if (sortBy) {
           const ptsIdx = headers.indexOf(sortBy.primary);
@@ -283,6 +328,7 @@
     statusEl: document.getElementById("statusStandings"),
     searchEl: document.getElementById("searchStandings"),
     sortBy: { primary: "PTS", tiebreak: "GD" },
+    showBadges: true,
   });
 
   createTableController({
