@@ -13,6 +13,7 @@
     --card: #161d2e;
     --accent: #4f8cff;
     --accent-2: #22c55e;
+    --gold: #f5c518;
     --text: #e8ecf4;
     --muted: #8b93a7;
     --border: #232b3d;
@@ -29,7 +30,7 @@
     padding: 24px 16px 60px;
   }
 
-  .wrap { max-width: 1000px; margin: 0 auto; }
+  .wrap { max-width: 1050px; margin: 0 auto; }
 
   header { text-align: center; margin-bottom: 20px; }
 
@@ -66,6 +67,7 @@
     font-weight: 600;
     cursor: pointer;
     border-bottom: 2px solid transparent;
+    font-family: inherit;
   }
 
   .tab-btn.active {
@@ -94,10 +96,55 @@
     background: var(--card);
     color: var(--text);
     font-size: 14px;
+    font-family: inherit;
   }
   .search:focus { outline: 2px solid var(--accent); }
 
   .status { font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+  .legend {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0 0 10px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .dot.playoff { background: var(--accent-2); }
+  .dot.hv { background: var(--gold); }
+
+  .club-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .club-filter-btn {
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .club-filter-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .club-filter-btn.clear-btn {
+    border-color: #f87171;
+    color: #f87171;
+    background: transparent;
+  }
 
   .table-card {
     background: var(--card);
@@ -130,6 +177,27 @@
 
   tbody tr:nth-child(even) { background: var(--row-alt); }
   tbody tr:hover { background: #1a2338; }
+
+  tr.playoff-row {
+    box-shadow: inset 3px 0 0 var(--accent-2);
+  }
+  tr.playoff-row td:first-child {
+    color: var(--accent-2);
+    font-weight: 700;
+  }
+
+  tr.hv-row {
+    box-shadow: inset 3px 0 0 var(--gold);
+    background: rgba(245, 197, 24, 0.08);
+  }
+  tr.hv-row:nth-child(even) { background: rgba(245, 197, 24, 0.12); }
+
+  .hv-tag {
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 12px;
+    white-space: nowrap;
+  }
 
   .club-cell {
     display: flex;
@@ -174,6 +242,9 @@
 
   <!-- STANDINGS PANEL -->
   <div id="panel-standings" class="panel active">
+    <div class="legend">
+      <span><span class="dot playoff"></span> Top 8 &mdash; qualify for playoffs</span>
+    </div>
     <div class="toolbar">
       <input id="searchStandings" class="search" type="text" placeholder="Search a club...">
       <span id="statusStandings" class="status">Loading standings...</span>
@@ -191,6 +262,10 @@
 
   <!-- MATCHES PANEL -->
   <div id="panel-matches" class="panel">
+    <div class="legend">
+      <span><span class="dot hv"></span> High voltage matchup</span>
+    </div>
+    <div id="clubFilterBar" class="club-filter-bar"></div>
     <div class="toolbar">
       <input id="searchMatches" class="search" type="text" placeholder="Search a player...">
       <span id="statusMatches" class="status">Loading matches...</span>
@@ -214,12 +289,25 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script>
   // === CONFIGURE THESE ===
-  // Paste your two "Publish to web" CSV links from Google Sheets here.
   const STANDINGS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR15py1cqLDHUW-WvvqMk97cCKUs_gdT9U1L4q4VMhbYFHq_U3suuv5Euy7Qm1ltMs6fOLQzZ9zY8Nv/pub?gid=545012572&single=true&output=csv";
   const MATCHES_CSV_URL   = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR15py1cqLDHUW-WvvqMk97cCKUs_gdT9U1L4q4VMhbYFHq_U3suuv5Euy7Qm1ltMs6fOLQzZ9zY8Nv/pub?gid=161752434&single=true&output=csv";
   // ========================
 
-  const REFRESH_MS = 60000; // auto-refresh every 60 seconds
+  const REFRESH_MS = 60000;
+  const PLAYOFF_CUTOFF = 8;
+
+  // Clubs considered a "high voltage" matchup when they play each other
+  const HIGH_VOLTAGE_CLUBS = new Set([
+    "Inter Milan", "Crewe Alexandra", "AC Milan", "PSG",
+    "Juventus", "Borussia Dortmund", "Manchester United", "Chelsea"
+  ]);
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
 
   // Turns a club name into a filename-friendly slug, e.g. "FC Barcelona" -> "fc-barcelona"
   function clubSlug(name) {
@@ -230,46 +318,49 @@
       .replace(/\s+/g, "-");
   }
 
-  // Generic table controller, one instance per tab
-  function createTableController({ csvUrl, headEl, bodyEl, tableEl, emptyEl, statusEl, searchEl, sortBy, showBadges }) {
-    let headers = [];
-    let allRows = [];
-    let clubColIndex = -1;
+  function clubBadgeHtml(name) {
+    const slug = clubSlug(name);
+    return `<div class="club-cell">
+      <img class="club-badge" src="assets/logos/${slug}.png" alt="" onerror="this.style.display='none'">
+      <span>${escapeHtml(name)}</span>
+    </div>`;
+  }
 
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-    }
+  // ============== STANDINGS ==============
+  function initStandings() {
+    const headEl = document.getElementById("headStandings");
+    const bodyEl = document.getElementById("bodyStandings");
+    const tableEl = document.getElementById("tableStandings");
+    const emptyEl = document.getElementById("emptyStandings");
+    const statusEl = document.getElementById("statusStandings");
+    const searchEl = document.getElementById("searchStandings");
+
+    let headers = [];
+    let sortedRows = []; // full sorted list, each row tagged with its position
 
     function render(rows) {
-      headEl.innerHTML = headers.map(h => `<th>${escapeHtml(h)}</th>`).join("");
+      headEl.innerHTML = `<th>#</th>` + headers.map(h => `<th>${escapeHtml(h)}</th>`).join("");
       if (!rows.length) {
-        bodyEl.innerHTML = `<tr><td colspan="${headers.length}">No data found.</td></tr>`;
+        bodyEl.innerHTML = `<tr><td colspan="${headers.length + 1}">No data found.</td></tr>`;
         return;
       }
-      bodyEl.innerHTML = rows.map(row => {
-        const cells = headers.map((val, i) => {
+      bodyEl.innerHTML = rows.map(({ row, pos }) => {
+        const rowClass = pos <= PLAYOFF_CUTOFF ? "playoff-row" : "";
+        const cells = headers.map((h, i) => {
           const raw = row[i] ?? "";
-          if (showBadges && i === clubColIndex) {
-            const slug = clubSlug(raw);
-            return `<td><div class="club-cell">
-              <img class="club-badge" src="assets/logos/${slug}.png" alt=""
-                   onerror="this.style.display='none'">
-              <span>${escapeHtml(raw)}</span>
-            </div></td>`;
+          if (String(h).trim().toLowerCase() === "club") {
+            return `<td>${clubBadgeHtml(raw)}</td>`;
           }
           return `<td>${escapeHtml(raw)}</td>`;
         }).join("");
-        return `<tr>${cells}</tr>`;
+        return `<tr class="${rowClass}"><td>${pos}</td>${cells}</tr>`;
       }).join("");
     }
 
     async function load() {
       try {
         statusEl.textContent = "Refreshing...";
-        const res = await fetch(csvUrl + (csvUrl.includes("?") ? "&" : "?") + "cachebust=" + Date.now());
+        const res = await fetch(STANDINGS_CSV_URL + (STANDINGS_CSV_URL.includes("?") ? "&" : "?") + "cachebust=" + Date.now());
         if (!res.ok) throw new Error("Network response was not OK");
         const csvText = await res.text();
         const parsed = Papa.parse(csvText.trim(), { skipEmptyLines: true });
@@ -277,23 +368,19 @@
         if (!rows.length) throw new Error("No data found in sheet");
 
         headers = rows[0];
-        allRows = rows.slice(1);
-        clubColIndex = headers.findIndex(h => String(h).trim().toLowerCase() === "club");
+        const dataRows = rows.slice(1);
+        const ptsIdx = headers.indexOf("PTS");
+        const gdIdx = headers.indexOf("GD");
 
-        if (sortBy) {
-          const ptsIdx = headers.indexOf(sortBy.primary);
-          const gdIdx = headers.indexOf(sortBy.tiebreak);
-          if (ptsIdx !== -1) {
-            allRows.sort((a, b) => {
-              const ptsDiff = (parseFloat(b[ptsIdx]) || 0) - (parseFloat(a[ptsIdx]) || 0);
-              if (ptsDiff !== 0) return ptsDiff;
-              if (gdIdx !== -1) return (parseFloat(b[gdIdx]) || 0) - (parseFloat(a[gdIdx]) || 0);
-              return 0;
-            });
-          }
-        }
+        dataRows.sort((a, b) => {
+          const ptsDiff = (parseFloat(b[ptsIdx]) || 0) - (parseFloat(a[ptsIdx]) || 0);
+          if (ptsDiff !== 0) return ptsDiff;
+          if (gdIdx !== -1) return (parseFloat(b[gdIdx]) || 0) - (parseFloat(a[gdIdx]) || 0);
+          return 0;
+        });
 
-        render(allRows);
+        sortedRows = dataRows.map((row, i) => ({ row, pos: i + 1 }));
+        render(sortedRows);
 
         tableEl.style.display = "table";
         emptyEl.style.display = "none";
@@ -310,36 +397,148 @@
 
     searchEl.addEventListener("input", (e) => {
       const q = e.target.value.trim().toLowerCase();
-      if (!q) { render(allRows); return; }
-      // allRows is already sorted, so filtering preserves the sorted order
-      render(allRows.filter(row => row.some(cell => String(cell).toLowerCase().includes(q))));
+      if (!q) { render(sortedRows); return; }
+      render(sortedRows.filter(({ row }) => row.some(cell => String(cell).toLowerCase().includes(q))));
     });
 
     load();
     setInterval(load, REFRESH_MS);
   }
 
-  createTableController({
-    csvUrl: STANDINGS_CSV_URL,
-    headEl: document.getElementById("headStandings"),
-    bodyEl: document.getElementById("bodyStandings"),
-    tableEl: document.getElementById("tableStandings"),
-    emptyEl: document.getElementById("emptyStandings"),
-    statusEl: document.getElementById("statusStandings"),
-    searchEl: document.getElementById("searchStandings"),
-    sortBy: { primary: "PTS", tiebreak: "GD" },
-    showBadges: true,
-  });
+  // ============== MATCHES ==============
+  function initMatches() {
+    const headEl = document.getElementById("headMatches");
+    const bodyEl = document.getElementById("bodyMatches");
+    const tableEl = document.getElementById("tableMatches");
+    const emptyEl = document.getElementById("emptyMatches");
+    const statusEl = document.getElementById("statusMatches");
+    const searchEl = document.getElementById("searchMatches");
+    const filterBarEl = document.getElementById("clubFilterBar");
 
-  createTableController({
-    csvUrl: MATCHES_CSV_URL,
-    headEl: document.getElementById("headMatches"),
-    bodyEl: document.getElementById("bodyMatches"),
-    tableEl: document.getElementById("tableMatches"),
-    emptyEl: document.getElementById("emptyMatches"),
-    statusEl: document.getElementById("statusMatches"),
-    searchEl: document.getElementById("searchMatches"),
-  });
+    let headers = [];
+    let allRows = [];
+    let homeIdx = -1, awayIdx = -1;
+    let selectedClubs = new Set();
+    let filterBarBuilt = false;
+
+    function isHighVoltage(row) {
+      if (homeIdx === -1 || awayIdx === -1) return false;
+      return HIGH_VOLTAGE_CLUBS.has(row[homeIdx]) && HIGH_VOLTAGE_CLUBS.has(row[awayIdx]);
+    }
+
+    function matchesClubFilter(row) {
+      if (selectedClubs.size === 0) return true;
+      return selectedClubs.has(row[homeIdx]) || selectedClubs.has(row[awayIdx]);
+    }
+
+    function render(rows) {
+      headEl.innerHTML = headers.map(h => `<th>${escapeHtml(h)}</th>`).join("") + `<th></th>`;
+      if (!rows.length) {
+        bodyEl.innerHTML = `<tr><td colspan="${headers.length + 1}">No matches found.</td></tr>`;
+        return;
+      }
+      bodyEl.innerHTML = rows.map(row => {
+        const hv = isHighVoltage(row);
+        const cells = headers.map((h, i) => {
+          const raw = row[i] ?? "";
+          if (i === homeIdx || i === awayIdx) {
+            return `<td>${clubBadgeHtml(raw)}</td>`;
+          }
+          return `<td>${escapeHtml(raw)}</td>`;
+        }).join("");
+        const tag = hv ? `<td><span class="hv-tag">&#128293; High Voltage</span></td>` : `<td></td>`;
+        return `<tr class="${hv ? 'hv-row' : ''}">${cells}${tag}</tr>`;
+      }).join("");
+    }
+
+    function applyFilters() {
+      const q = searchEl.value.trim().toLowerCase();
+      let rows = allRows.filter(matchesClubFilter);
+      if (q) {
+        rows = rows.filter(row => row.some(cell => String(cell).toLowerCase().includes(q)));
+      }
+      render(rows);
+    }
+
+    function buildFilterBar() {
+      if (filterBarBuilt || homeIdx === -1 || awayIdx === -1) return;
+      const clubs = new Set();
+      allRows.forEach(row => {
+        if (row[homeIdx]) clubs.add(row[homeIdx]);
+        if (row[awayIdx]) clubs.add(row[awayIdx]);
+      });
+      const sortedClubs = Array.from(clubs).sort();
+
+      filterBarEl.innerHTML = "";
+      sortedClubs.forEach(club => {
+        const btn = document.createElement("button");
+        btn.className = "club-filter-btn";
+        btn.textContent = club;
+        btn.addEventListener("click", () => {
+          if (selectedClubs.has(club)) {
+            selectedClubs.delete(club);
+            btn.classList.remove("active");
+          } else {
+            selectedClubs.add(club);
+            btn.classList.add("active");
+          }
+          applyFilters();
+        });
+        filterBarEl.appendChild(btn);
+      });
+
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "club-filter-btn clear-btn";
+      clearBtn.textContent = "Clear filters";
+      clearBtn.addEventListener("click", () => {
+        selectedClubs.clear();
+        filterBarEl.querySelectorAll(".club-filter-btn.active").forEach(b => b.classList.remove("active"));
+        applyFilters();
+      });
+      filterBarEl.appendChild(clearBtn);
+
+      filterBarBuilt = true;
+    }
+
+    async function load() {
+      try {
+        statusEl.textContent = "Refreshing...";
+        const res = await fetch(MATCHES_CSV_URL + (MATCHES_CSV_URL.includes("?") ? "&" : "?") + "cachebust=" + Date.now());
+        if (!res.ok) throw new Error("Network response was not OK");
+        const csvText = await res.text();
+        const parsed = Papa.parse(csvText.trim(), { skipEmptyLines: true });
+        const rows = parsed.data;
+        if (!rows.length) throw new Error("No data found in sheet");
+
+        headers = rows[0];
+        allRows = rows.slice(1);
+        homeIdx = headers.findIndex(h => String(h).trim().toLowerCase() === "home club");
+        awayIdx = headers.findIndex(h => String(h).trim().toLowerCase() === "away club");
+
+        buildFilterBar();
+        applyFilters();
+
+        tableEl.style.display = "table";
+        emptyEl.style.display = "none";
+        statusEl.textContent = "Updated " + new Date().toLocaleTimeString();
+      } catch (err) {
+        console.error(err);
+        tableEl.style.display = "none";
+        emptyEl.style.display = "block";
+        emptyEl.classList.add("error");
+        emptyEl.textContent = "Could not load data. Check the CSV link in index.html.";
+        statusEl.textContent = "Error loading data";
+      }
+    }
+
+    searchEl.addEventListener("input", applyFilters);
+
+    load();
+    setInterval(load, REFRESH_MS);
+  }
+
+  initStandings();
+  initMatches();
 
   // Tab switching
   document.querySelectorAll(".tab-btn").forEach(btn => {
